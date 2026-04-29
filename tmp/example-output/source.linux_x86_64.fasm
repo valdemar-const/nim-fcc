@@ -1,0 +1,34 @@
+;; compiled : 'source.c'
+;; platform : linux
+;; arch     : x86_64
+
+format ELF64 executable 3    ; ELF64, executable, ABI = Linux (3)
+entry _start                 ; точка входа (без libc)
+
+segment readable executable
+
+_start:
+    ;; --- эмуляция CRT: вызов main(argc, argv) ---
+    ;; В _start: rsp -> argc, rsp+8 -> argv[0], ...
+    mov  rdi, [rsp]          ; rdi = argc   (1-й аргумент main)
+    lea  rsi, [rsp+8]        ; rsi = argv   (2-й аргумент main)
+    call main                ; call main(argc, argv)
+
+    ;; --- exit(main()) ---
+    ;; возвращаемое значение main уже в rax
+    mov  rdi, rax            ; rdi = exit code (= return value of main)
+    mov  rax, 60             ; syscall № 60 = exit
+    syscall                  ; exit(42)
+
+main:
+    ;; int main(int argc, char *argv[])
+    ;; аргументы: rdi=argc, rsi=argv  (System V AMD64 ABI)
+    ;; выравнивание стека: -8 (ret адрес уже положен call'ом → rsp кратен 8)
+    push rbp                 ; стандартный пролог
+    mov  rbp, rsp            ;
+
+    ;; return 42;
+    mov  eax, 42             ; rax = 42  (return value)
+
+    pop  rbp                 ; эпилог
+    ret                      ; вернуться в _start

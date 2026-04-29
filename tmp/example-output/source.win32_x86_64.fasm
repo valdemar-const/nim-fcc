@@ -1,0 +1,34 @@
+;; compiled : 'source.c'
+;; platform : win32
+;; arch     : x86_64
+
+format PE64 console
+entry start
+
+include 'win64a.inc'
+
+section '.text' code readable executable
+
+start:
+    ; --- выравнивание стека + shadow space (32 байта) ---
+    ; на входе rsp ≡ 8 (mod 16) – из-за адреса возврата на вершине
+    sub     rsp, 40          ; 32 (shadow) + 8 (довыравнивание)
+    call    main             ; вызов main() по Microsoft x64 ABI
+
+    ; main вернул int в eax -> передаём в ExitProcess
+    mov     ecx, eax         ; первый целочисленный аргумент – в ecx
+    call    [ExitProcess]    ; выход с кодом возврата
+    ; сюда управление не возвращается
+
+main:
+    ; --- обычный фрейм ---
+    push    rbp
+    mov     rbp, rsp
+    ; return 42;
+    mov     eax, 42
+    pop     rbp
+    ret
+
+section '.idata' import data readable writeable
+    library kernel32, 'kernel32.dll'
+    import kernel32, ExitProcess, 'ExitProcess'

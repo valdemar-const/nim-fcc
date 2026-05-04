@@ -26,6 +26,8 @@ proc make_c_spirit_parser(): Parser =
   let rparen    = x3.token(x3.char(')'))
   let lbrace    = x3.token(x3.char('{'))
   let rbrace    = x3.token(x3.char('}'))
+  let lbraket   = x3.token(x3.char('['))
+  let rbraket   = x3.token(x3.char(']'))
   let semicolon = x3.token(x3.char(';'))
   let comma     = x3.token(x3.char(','))
   let star      = x3.token(x3.char('*'))
@@ -33,13 +35,12 @@ proc make_c_spirit_parser(): Parser =
   # grammar: atoms
 
   let identifier      = (x3.alpha | x3.char('_')) >> *(x3.alpha | x3.digit | x3.char('_'))
+  let identifier_token = x3.token(identifier)
   let numeric_literal = +(x3.digit)
 
   # grammar: types
 
-  # [volatile | const]
-  # [ signed | unsigned ], char, short, int, long, long long
-  # float, double, long double
+  let type_qualifier = kw_const | kw_volatile
 
   let type_basic_char       = ?(kw_signed) >> kw_char
   let type_basic_short      = ?(kw_signed) >> kw_short
@@ -53,15 +54,41 @@ proc make_c_spirit_parser(): Parser =
   let type_basic_ulong      = ?(kw_unsigned) >> kw_long
   let type_basic_ulong_long = ?(kw_unsigned) >> kw_long >> kw_long
 
-  let type_name = type_basic_int | identifier
+  let type_basic_float = kw_float
+  let type_basic_double = kw_double
+  let type_basic_long_double = kw_long >> kw_double
 
-  let type_qualifier = kw_const | kw_volatile
+  let type_name = type_basic_long_long |
+      type_basic_long_double |
+      type_basic_long |
+      type_basic_int |
+      type_basic_short |
+      type_basic_char |
+      type_basic_ulong |
+      type_basic_uint |
+      type_basic_ushort |
+      type_basic_uchar |
+      type_basic_double |
+      type_basic_float |
+      identifier
 
-  let basic_type     = *type_qualifier >> type_name
-  let type_def       = basic_type
+  let pointer = *(star >> ?type_qualifier)
+
+  var declarator_parser: Parser # forward decl
+  var expr: Parser              # forward decl
+  var func_params: Parser       # forward decl
+
+  let array_size = (s: var Stream) => (token(lbraket >> ?expr >> rbraket)(s))
+  let postfix    = (s: var Stream) => (*(array_size | func_params))(s)
+
+  let direct_declarator = (s: var Stream) => ((identifier_token | (lparen >> declarator_parser >> rparen)) >> postfix)(s)
+
+  declarator_parser = pointer >> direct_declarator
+  let type_def      = *type_qualifier >> type_name >> declarator_parser
 
   # grammar: expressions
-  let expr = numeric_literal
+
+  expr = numeric_literal
 
   # grammar function definition
 
@@ -69,9 +96,10 @@ proc make_c_spirit_parser(): Parser =
   let func_stmt = stmt_return >> semicolon
   let func_stmt_list = *func_stmt
   let func_body = lbrace >> func_stmt_list >> rbrace
-  let formal_param = (type_def >> ?(identifier))
+  let formal_param = type_def
   let formal_param_list = formal_param % comma
-  let func_def = type_def >> identifier >> lparen >> formal_param_list >> rparen >> func_body
+  func_params = lparen >> formal_param_list >> rparen
+  let func_def = type_def >> func_body
   let func_def_list = +func_def
 
   let c_module = func_def_list

@@ -1,121 +1,113 @@
-import spirit
-
-import std/sugar
+# parser.nim
+import spirit/x3
 import std/strformat
 
-proc make_c_spirit_parser(): Parser =
-  # grammar
+type CVoid = Parser[Void]
 
-  # grammar: keywords
+proc makeCParser*(): CVoid =
 
-  let kw_signed   = x3.token(x3.literal("signed"))
-  let kw_unsigned = x3.token(x3.literal("unsigned"))
-  let kw_const    = x3.token(x3.literal("const"))
-  let kw_volatile = x3.token(x3.literal("volatile"))
-  let kw_char     = x3.token(x3.literal("char"))
-  let kw_short    = x3.token(x3.literal("short"))
-  let kw_int      = x3.token(x3.literal("int"))
-  let kw_long     = x3.token(x3.literal("long"))
-  let kw_float    = x3.token(x3.literal("float"))
-  let kw_double   = x3.token(x3.literal("double"))
-  let kw_return   = x3.token(x3.literal("return"))
+  let kw_signed   = token(literal("signed"))
+  let kw_unsigned = token(literal("unsigned"))
+  let kw_const    = token(literal("const"))
+  let kw_volatile = token(literal("volatile"))
+  let kw_char     = token(literal("char"))
+  let kw_short    = token(literal("short"))
+  let kw_int      = token(literal("int"))
+  let kw_long     = token(literal("long"))
+  let kw_float    = token(literal("float"))
+  let kw_double   = token(literal("double"))
+  let kw_return   = token(literal("return"))
 
-  # grammar: delimetrs
+  # ch(...) вместо char(...)
+  let lparen    = token(omit(ch('(')))
+  let rparen    = token(omit(ch(')')))
+  let lbrace    = token(omit(ch('{')))
+  let rbrace    = token(omit(ch('}')))
+  let lbraket   = token(omit(ch('[')))
+  let rbraket   = token(omit(ch(']')))
+  let semicolon = token(omit(ch(';')))
+  let comma     = token(omit(ch(',')))
+  let star      = token(omit(ch('*')))
 
-  let lparen    = x3.token(x3.char('('))
-  let rparen    = x3.token(x3.char(')'))
-  let lbrace    = x3.token(x3.char('{'))
-  let rbrace    = x3.token(x3.char('}'))
-  let lbraket   = x3.token(x3.char('['))
-  let rbraket   = x3.token(x3.char(']'))
-  let semicolon = x3.token(x3.char(';'))
-  let comma     = x3.token(x3.char(','))
-  let star      = x3.token(x3.char('*'))
+  # identifier: первый символ — буква или '_'
+  let identFirst = omit(alpha | ch('_'))
+  let identRest  = omit(alpha | digit | ch('_'))
+  let identifier = token(identFirst >> *identRest)
 
-  # grammar: atoms
+  # identifier как строка — когда значение нужно
+  let identifierStr: Parser[string] =
+    token(asString((alpha | ch('_')) >> *(alpha | digit | ch('_'))))
 
-  let identifier      = (x3.alpha | x3.char('_')) >> *(x3.alpha | x3.digit | x3.char('_'))
-  let identifier_token = x3.token(identifier)
-  let numeric_literal = +(x3.digit)
+  let numericLiteral = token(omit(+digit))
 
-  # grammar: types
+  let typeQualifier = kw_const | kw_volatile
 
-  let type_qualifier = kw_const | kw_volatile
+  let typeName =
+    (?kw_signed   >> kw_long >> kw_long)   |
+    (?kw_signed   >> kw_long)              |
+    (?kw_signed   >> kw_int)               |
+    (?kw_signed   >> kw_short)             |
+    (?kw_signed   >> kw_char)              |
+    (?kw_unsigned >> kw_long >> kw_long)   |
+    (?kw_unsigned >> kw_long)              |
+    (?kw_unsigned >> kw_int)               |
+    (?kw_unsigned >> kw_short)             |
+    (?kw_unsigned >> kw_char)              |
+    (kw_long >> kw_double)                 |
+    kw_double                              |
+    kw_float                               |
+    identifier
 
-  let type_basic_char       = ?(kw_signed) >> kw_char
-  let type_basic_short      = ?(kw_signed) >> kw_short
-  let type_basic_int        = ?(kw_signed) >> kw_int
-  let type_basic_long       = ?(kw_signed) >> kw_long
-  let type_basic_long_long  = ?(kw_signed) >> kw_long >> kw_long
+  let pointer = *(star >> ?typeQualifier)
 
-  let type_basic_uchar      = ?(kw_unsigned) >> kw_char
-  let type_basic_ushort     = ?(kw_unsigned) >> kw_short
-  let type_basic_uint       = ?(kw_unsigned) >> kw_int
-  let type_basic_ulong      = ?(kw_unsigned) >> kw_long
-  let type_basic_ulong_long = ?(kw_unsigned) >> kw_long >> kw_long
+  # forward declarations через замыкания
+  var declaratorFn: proc(ctx: var ParseContext, a: var Void): bool {.closure.}
+  var exprFn:       proc(ctx: var ParseContext, a: var Void): bool {.closure.}
+  var funcParamsFn: proc(ctx: var ParseContext, a: var Void): bool {.closure.}
 
-  let type_basic_float = kw_float
-  let type_basic_double = kw_double
-  let type_basic_long_double = kw_long >> kw_double
+  let declarator = Parser[Void](fn: proc(ctx: var ParseContext,
+                                          a: var Void): bool =
+    declaratorFn(ctx, a))
+  let expr       = Parser[Void](fn: proc(ctx: var ParseContext,
+                                          a: var Void): bool =
+    exprFn(ctx, a))
+  let funcParams = Parser[Void](fn: proc(ctx: var ParseContext,
+                                          a: var Void): bool =
+    funcParamsFn(ctx, a))
 
-  let type_name = type_basic_long_long |
-      type_basic_long_double |
-      type_basic_long |
-      type_basic_int |
-      type_basic_short |
-      type_basic_char |
-      type_basic_ulong |
-      type_basic_uint |
-      type_basic_ushort |
-      type_basic_uchar |
-      type_basic_double |
-      type_basic_float |
-      identifier
+  exprFn = numericLiteral.fn
 
-  let pointer = *(star >> ?type_qualifier)
+  let arraySize  = lbraket >> ?expr >> rbraket
+  let postfix    = *(arraySize | funcParams)
+  let directDecl = (identifier | (lparen >> declarator >> rparen)) >> postfix
 
-  var declarator_parser: Parser # forward decl
-  var expr: Parser              # forward decl
-  var func_params: Parser       # forward decl
+  declaratorFn = (pointer >> directDecl).fn
 
-  let array_size = (s: var Stream) => (token(lbraket >> ?expr >> rbraket)(s))
-  let postfix    = (s: var Stream) => (*(array_size | func_params))(s)
+  let typeDef         = *typeQualifier >> typeName >> declarator
+  let formalParam     = typeDef
+  let formalParamList = formalParam % comma
 
-  let direct_declarator = (s: var Stream) => ((identifier_token | (lparen >> declarator_parser >> rparen)) >> postfix)(s)
+  funcParamsFn = (lparen >> omit(formalParamList) >> rparen).fn
 
-  declarator_parser = pointer >> direct_declarator
-  let type_def      = *type_qualifier >> type_name >> declarator_parser
+  let stmtReturn   = kw_return >> expr
+  let funcStmt     = stmtReturn >> semicolon
+  let funcStmtList = *funcStmt
+  let funcBody     = lbrace >> funcStmtList >> rbrace
+  let funcDef      = typeDef >> funcBody
 
-  # grammar: expressions
+  +funcDef
 
-  expr = numeric_literal
-
-  # grammar function definition
-
-  let stmt_return = kw_return >> expr
-  let func_stmt = stmt_return >> semicolon
-  let func_stmt_list = *func_stmt
-  let func_body = lbrace >> func_stmt_list >> rbrace
-  let formal_param = type_def
-  let formal_param_list = formal_param % comma
-  func_params = lparen >> formal_param_list >> rparen
-  let func_def = type_def >> func_body
-  let func_def_list = +func_def
-
-  let c_module = func_def_list
-  c_module
-
-# parser
+# ── API ──────────────────────────────────────────────────────────────────────
 
 type ParserLangC* = object
-  parser_impl: x3.Parser
+  impl: Parser[Void]
 
 proc newParserLangC*(): ParserLangC =
-  let c_parser = make_c_spirit_parser()
-  result = ParserLangC(parser_impl: (stream: var x3.Stream) => (c_parser(stream)))
+  ParserLangC(impl: makeCParser())
 
 proc parse*(p: ParserLangC, source: string): bool =
-  var stream = x3.newStringStream(source)
-  let parsed = p.parser_impl(stream)
-  echo(fmt"source.len: {source.len}, stream.pos: {stream.pos}")
-  parsed and x3.pos(stream) == source.len
+  var ctx = ParseContext(input: source, pos: 0)
+  var dummy: Void
+  let ok = p.impl.fn(ctx, dummy)
+  echo fmt"source.len: {source.len}, stream.pos: {ctx.pos}"
+  ok and ctx.pos == source.len
